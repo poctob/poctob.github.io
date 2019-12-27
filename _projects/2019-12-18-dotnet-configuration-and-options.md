@@ -5,7 +5,12 @@ description: Simple recipie of options pattern common use
 summary: 
 category: Dotnet core recipes
 ---
+- [Simple IConifguration Setup](#simple-iconfiguration-based-setup-if-you-need-to-access-one-or-two-string-based-values)
+- [Configuration to POCO and Options patern](#standard-configuration-to-poco-and-options-pattern)
+- [Key Vault based configuration](#using-azure-key-vault-to-manage-and-access-sensitive-configuration-values)
+- [Configuration file in Azure Blob Storage](#storing-and-accessing-encrypted-configuration-file-in-azure-blob-storage)
 
+---
 ## Simple IConfiguration based setup, if you need to access one or two string based values
 1. Add configuration data into `appsettings.json`
 ```json
@@ -38,6 +43,7 @@ category: Dotnet core recipes
     }
 ```
 
+---
 ## Standard configuration to POCO and options pattern
 1. Create POCO representation of your configuration:
 ```cs
@@ -90,7 +96,75 @@ namespace MyProject.Config
         }
 ```
 
+---
 ## Using Azure Key Vault to manage and access sensitive configuration values
 
+### Ingredients
+
+- Packages
+  - Microsoft.Azure.KeyVault
+  - Microsoft.Azure.Services.AppAuthentication
+  - Microsoft.Extensions.Configuration.AzureKeyVault
+- App Requirements
+  - Enable managed identity
+- Key Vault Permissions for App Identity
+  - Get Secrets
+  - List Secrets
+- Configuration data is added as a secret to the Key Vault
+- Read [this article](https://docs.microsoft.com/en-us/aspnet/core/security/key-vault-configuration?view=aspnetcore-3.1)
+
+---
+### Steps
+1. Add YOUR key vault URL to configuration file `appsettings.json` (or app configuration in Azure)
+```json
+{
+    "KeyVaultUrl": "https://my-key-vault.vault.azure.net/"
+}
+```
+
+2. Modify `Program.cs` to use key vault for configuration
+```cs
+    public static IHostBuilder CreateHostBuilder(string[] args) =>
+            Host.CreateDefaultBuilder(args)
+                .ConfigureAppConfiguration((context, config) =>
+                {
+                    if (context.HostingEnvironment.IsProduction())
+                    {
+                        var builtConfig = config.Build();
+
+                        var azureServiceTokenProvider = new AzureServiceTokenProvider();
+                        var keyVaultClient = new KeyVaultClient(
+                            new KeyVaultClient.AuthenticationCallback(
+                                azureServiceTokenProvider.KeyVaultTokenCallback));
+
+                        config.AddAzureKeyVault(
+                                builtConfig["KeyVaultUrl"],
+                                keyVaultClient,
+                                new DefaultKeyVaultSecretManager());
+                    }
+                })
+                .ConfigureWebHostDefaults(webBuilder =>
+                {
+                    webBuilder.UseStartup<Startup>();
+                });
+```
+
+3. Access configuration values in `Startup.cs` as per usual. Typical pattern would be to load sensitive values from key vault and keep rest of the configuration in a config file.
+```cs
+    services.Configure<ConfigurationData>(o =>
+           {
+               /* In this case, ServiceConnetionString is pulled from the key vault.
+                  Secret name will be ConnectionStrings--ServiceConnetionString,     
+                  Note that configuration levels in key vault are separated by -- (two dashes).
+                  dotnet user-secrets uses : (colon) to separate them
+               */
+               o.SensitiveConnectionString = Configuration.GetConnectionString("ServiceConnetionString");
+
+               /* Rest of configuration object is bound through options pattern */
+               Configuration.GetSection("ConfigurationData").Bind(o);
+           });
+```
+
+---
 ## Storing and accessing encrypted configuration file in Azure Blob Storage
 
